@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planner: Discover and Plan your Culinary Adventures!</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <h1>Planner: Discover and Plan your Culinary Adventures!</h1>
+    <div>
+        <label for="section">Choose Section:</label>
+        <select id="section" onchange="loadSection()">
+            <option value="location_finder">Location Finder</option>
+            <option value="trip_planner">Trip Planner</option>
+            <option value="weather_forecasting">Weather Forecasting</option>
+            <option value="restaurant_hotel_planner">Restaurant & Hotel Planner</option>
+        </select>
+    </div>
+    <div id="form-container"></div>
+    <div id="output"></div>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>
