@@ -3,46 +3,33 @@ import json
 import pymysql
 import os
 import re
-from dotenv import load_dotenv
 import google.generativeai as genai
-import uuid
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Database connection details
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# SQS and database details
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 RDS_HOST = os.getenv("RDS_HOST")
 RDS_PORT = int(os.getenv("RDS_PORT", 3306))
 RDS_USER = os.getenv("RDS_USER")
 RDS_PASSWORD = os.getenv("RDS_PASSWORD")
 RDS_DB = os.getenv("RDS_DB")
 
-# SQS details
-SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
-sqs = boto3.client('sqs', region_name='us-east-1')
+sqs = boto3.client('sqs', region_name='us-east-1')  # Adjust region if needed
 
 # Function to get database connection
 def get_db_connection():
-    try:
-        conn = pymysql.connect(
-            host=RDS_HOST,
-            port=RDS_PORT,
-            user=RDS_USER,
-            password=RDS_PASSWORD,
-            database=RDS_DB
-        )
-        return conn
-    except Exception as e:
-        print(f"Error connecting to RDS MySQL: {e}")
-        return None
-    
-def get_response(prompt):
-    try:
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        return response.text.strip() if response else "No response generated."
-    except Exception as e:
-        raise RuntimeError(f"Error generating response: {str(e)}")
+    return pymysql.connect(
+        host=RDS_HOST,
+        port=RDS_PORT,
+        user=RDS_USER,
+        password=RDS_PASSWORD,
+        database=RDS_DB
+    )
 
 # Function to parse AI response
 def parse_response(response):
@@ -98,89 +85,54 @@ def parse_response(response):
     except Exception as e:
         raise ValueError(f"Failed to parse response: {str(e)}")
 
-# Function to process messages from SQS
-def process_sqs_messages():
-    while True:
-        try:
-            response = sqs.receive_message(
-                QueueUrl=SQS_QUEUE_URL,
-                MaxNumberOfMessages=1,
-                WaitTimeSeconds=10  # Long polling
-            )
-            if 'Messages' in response:
-                for message in response['Messages']:
-                    message_body = json.loads(message['Body'])
-                    print(f"Processing message: {message_body}")
 
-                    # Extract details
-                    request_id = message_body['request_id']
-                    location = message_body['location']
-                    duration = message_body['duration']
-                    budget = message_body['budget']
+# Function to process SQS messages
+def process_message(message):
+    data = json.loads(message['Body'])
+    location = data['location']
+    duration = data['duration']
+    budget = data['budget']
+    request_id = data['request_id']
 
-                    # Simulate generating a response
-                    prompt = f"""
-                    You are an expert Tour Planner. Create a detailed travel plan for the following:
-                    - Location: {location}
-                    - Duration: {duration} days
-                    - Budget: ${budget}
-                    Include:
-                    - Daily itinerary with activities and accommodations.
-                    - Best month to visit.
-                    - Budget breakdown (accommodation, food, travel, activities).
-                    - Weather forecast for the duration.
-                    - Top restaurants and hotels in the area with ratings and average costs.
-                    Return the response in markdown format with headings:
-                    ## Itinerary, ## Best Month to Visit, ## Budget Breakdown, ## Weather Forecast, ## Restaurants, ## Hotels.
-                    """
-                    generated_response = get_response(prompt)
-                    # Parse and save the response
-                    parsed_data = parse_response(generated_response)
-                    store_response(request_id, parsed_data)
-
-                    # Delete the message from the queue
-                    sqs.delete_message(
-                        QueueUrl=SQS_QUEUE_URL,
-                        ReceiptHandle=message['ReceiptHandle']
-                    )
-                    print(f"Message processed and deleted: {request_id}")
-            else:
-                print("No messages in queue. Waiting...")
-        except Exception as e:
-            print(f"Error processing messages: {e}")
-
-# Function to store response in database
-def store_response(request_id, parsed_data):
-    conn = get_db_connection()
-    if not conn:
-        print("Failed to connect to database.")
-        return
+    prompt = f"""
+    You are an expert Tour Planner. Create a detailed travel plan for the following:
+    - Location: {location}
+    - Duration: {duration} days
+    - Budget: ${budget}
+    """
     try:
+        response = genai.generate_content(prompt)
+        parsed_data = parse_response(response.text)
+
+        conn = get_db_connection()
         with conn.cursor() as cursor:
-            # Store itinerary details
+            # Store the response in the database
             cursor.execute(
                 "INSERT INTO trip_plans (id, request_id, itinerary, best_month_to_visit, budget_breakdown) VALUES (%s, %s, %s, %s, %s)",
                 (str(uuid.uuid4()), request_id, parsed_data['itinerary'], parsed_data['best_month'], parsed_data['budget_breakdown'])
             )
-            # Store restaurants
-            for restaurant in parsed_data['restaurants']:
-                cursor.execute(
-                    "INSERT INTO restaurants (id, request_id, name) VALUES (%s, %s, %s)",
-                    (str(uuid.uuid4()), request_id, restaurant)
-                )
-            # Store hotels
-            for hotel in parsed_data['hotels']:
-                cursor.execute(
-                    "INSERT INTO hotels (id, request_id, name) VALUES (%s, %s, %s)",
-                    (str(uuid.uuid4()), request_id, hotel)
-                )
         conn.commit()
-        print(f"Response stored for request ID: {request_id}")
+
+        print(f"Processed request {request_id} successfully.")
+
     except Exception as e:
-        print(f"Error storing response: {e}")
-    finally:
-        conn.close()
+        print(f"Failed to process message: {e}")
+
+# Poll SQS for messages
+def poll_sqs():
+    while True:
+        response = sqs.receive_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MaxNumberOfMessages=1,
+            WaitTimeSeconds=20
+        )
+        messages = response.get('Messages', [])
+        for message in messages:
+            process_message(message)
+            sqs.delete_message(
+                QueueUrl=SQS_QUEUE_URL,
+                ReceiptHandle=message['ReceiptHandle']
+            )
 
 if __name__ == "__main__":
-    print("Starting SQS worker...")
-    process_sqs_messages()
+    poll_sqs()
