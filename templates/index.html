@@ -3,22 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planner: Discover and Plan your Culinary Adventures!</title>
+    <title>Voyage Planner</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <h1>Planner: Discover and Plan your Culinary Adventures!</h1>
-    <div>
-        <label for="section">Choose Section:</label>
-        <select id="section" onchange="loadSection()">
-            <option value="location_finder">Location Finder</option>
-            <option value="trip_planner">Trip Planner</option>
-            <option value="weather_forecasting">Weather Forecasting</option>
-            <option value="restaurant_hotel_planner">Restaurant & Hotel Planner</option>
-        </select>
-    </div>
-    <div id="form-container"></div>
-    <div id="output"></div>
+    <header>
+        <h1>Voyage Planner </h1>
+        <p>Your one-stop solution for travel planning, weather updates, and local recommendations!</p>
+    </header>
+    <main>
+        <section class="form-section">
+            <h2>Plan Your Trip</h2>
+            <form id="trip-form">
+                <label for="location">Enter Destination:</label>
+                <input type="text" id="location" placeholder="e.g., Paris, Tokyo, New York" required>
+                
+                <label for="duration">Enter Duration (in days):</label>
+                <input type="number" id="duration" min="1" placeholder="e.g., 5" required>
+                
+                <label for="budget">Enter Budget (in USD):</label>
+                <input type="number" id="budget" min="1" placeholder="e.g., 1000" required>
+                
+                <button type="button" onclick="submitTripPlanner()">Get Trip Details</button>
+            </form>
+        </section>
+        <section id="output" class="output-section"></section>
+    </main>
+    <footer>
+        <p>&copy; 2024 Voyage Planner. All rights reserved.</p>
+    </footer>
     <script src="/static/js/script.js"></script>
 </body>
 </html>
