@@ -2,9 +2,11 @@ from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 import os
 import google.generativeai as genai
-import pymysql  
+import pymysql  # For connecting to MySQL
+import boto3  # For interacting with AWS SQS
 import re
 import uuid
+import json
 from flask_cors import CORS
 
 # Load environment variables
@@ -21,6 +23,10 @@ RDS_USER = os.getenv("RDS_USER")  # Database username
 RDS_PASSWORD = os.getenv("RDS_PASSWORD")  # Database password
 RDS_DB = os.getenv("RDS_DB")  # Database name
 
+# SQS details
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")  # SQS Queue URL
+sqs = boto3.client('sqs', region_name='us-east-1')  # Initialize SQS client
+
 # Function to get database connection
 def get_db_connection():
     try:
@@ -35,6 +41,25 @@ def get_db_connection():
     except Exception as e:
         print(f"Error connecting to RDS MySQL: {e}")
         return None
+
+# Function to send messages to SQS
+def send_to_sqs(location, duration, budget, request_id):
+    message_body = {
+        "location": location,
+        "duration": duration,
+        "budget": budget,
+        "request_id": request_id
+    }
+    try:
+        response = sqs.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps(message_body)
+        )
+        print(f"Message sent to SQS: {response['MessageId']}")
+        return True
+    except Exception as e:
+        print(f"Failed to send message to SQS: {e}")
+        return False
 
 # Function to initialize database schema
 def init_db():
@@ -187,52 +212,13 @@ def generate_content():
             )
             print("Inserted input_request:", request_id)
 
-            # Generate response using AI
-            prompt = f"""
-            You are an expert Tour Planner. Create a detailed travel plan for the following:
-            - Location: {location}
-            - Duration: {duration} days
-            - Budget: ${budget}
-            Include:
-            - Daily itinerary with activities and accommodations.
-            - Best month to visit.
-            - Budget breakdown (accommodation, food, travel, activities).
-            - Weather forecast for the duration.
-            - Top restaurants and hotels in the area with ratings and average costs.
-            Return the response in markdown format with headings:
-            ## Itinerary, ## Best Month to Visit, ## Budget Breakdown, ## Weather Forecast, ## Restaurants, ## Hotels.
-            """
-            response = get_response(prompt)
-            print("AI Response:", response)
+        conn.commit()
 
-            # Parse the response
-            parsed_data = parse_response(response)
-            print("Parsed Data:", parsed_data)
-
-            # Store parsed data
-            cursor.execute(
-                "INSERT INTO trip_plans (id, request_id, itinerary, best_month_to_visit, budget_breakdown) VALUES (%s, %s, %s, %s, %s)",
-                (str(uuid.uuid4()), request_id, parsed_data['itinerary'], parsed_data['best_month'], parsed_data['budget_breakdown'])
-            )
-            cursor.execute(
-                "INSERT INTO weather (id, request_id, forecast) VALUES (%s, %s, %s)",
-                (str(uuid.uuid4()), request_id, parsed_data['weather_forecast'])
-            )
-            for restaurant in parsed_data['restaurants']:
-                print("Inserting restaurant:", restaurant)
-                cursor.execute(
-                    "INSERT INTO restaurants (id, request_id, name) VALUES (%s, %s, %s)",
-                    (str(uuid.uuid4()), request_id, restaurant)
-                )
-            for hotel in parsed_data['hotels']:
-                print("Inserting hotel:", hotel)
-                cursor.execute(
-                    "INSERT INTO hotels (id, request_id, name) VALUES (%s, %s, %s)",
-                    (str(uuid.uuid4()), request_id, hotel)
-                )
-
-            conn.commit()
-            return jsonify({"response": response})
+        # Send request to SQS for asynchronous processing
+        if send_to_sqs(location, duration, budget, request_id):
+            return jsonify({"message": "Your request has been submitted for processing."}), 200
+        else:
+            return jsonify({"error": "Failed to send message to SQS."}), 500
 
     except Exception as e:
         conn.rollback()
