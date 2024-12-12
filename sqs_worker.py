@@ -95,13 +95,22 @@ def process_message(message):
     request_id = data['request_id']
 
     prompt = f"""
-    You are an expert Tour Planner. Create a detailed travel plan for the following:
-    - Location: {location}
-    - Duration: {duration} days
-    - Budget: ${budget}
-    """
+            You are an expert Tour Planner. Create a detailed travel plan for the following:
+            - Location: {location}
+            - Duration: {duration} days
+            - Budget: ${budget}
+            Include:
+            - Daily itinerary with activities and accommodations.
+            - Best month to visit.
+            - Budget breakdown (accommodation, food, travel, activities).
+            - Weather forecast for the duration.
+            - Top restaurants and hotels in the area with ratings and average costs.
+            Return the response in markdown format with headings:
+            ## Itinerary, ## Best Month to Visit, ## Budget Breakdown, ## Weather Forecast, ## Restaurants, ## Hotels.
+            """
     try:
-        response = genai.generate_content(prompt)
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
         parsed_data = parse_response(response.text)
 
         conn = get_db_connection()
