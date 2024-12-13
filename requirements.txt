@@ -2,3 +2,4 @@ google-generativeai
 python-dotenv
 pathlib
 flask
+fpdf

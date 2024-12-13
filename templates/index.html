@@ -8,7 +8,7 @@
 </head>
 <body>
     <header>
-        <h1>Voyage Planner </h1>
+        <h1>Voyage Planner</h1>
         <p>Your one-stop solution for travel planning, weather updates, and local recommendations!</p>
     </header>
     <main>
@@ -18,8 +18,16 @@
                 <label for="location">Enter Destination:</label>
                 <input type="text" id="location" placeholder="e.g., Paris, Tokyo, New York" required>
                 
-                <label for="duration">Enter Duration (in days):</label>
-                <input type="number" id="duration" min="1" placeholder="e.g., 5" required>
+                <div class="date-container">
+                    <div class="date-block">
+                        <label for="from-date">From Date:</label>
+                        <input type="date" id="from-date" required>
+                    </div>
+                    <div class="date-block">
+                        <label for="to-date">To Date:</label>
+                        <input type="date" id="to-date" required>
+                    </div>
+                </div>
                 
                 <label for="budget">Enter Budget (in USD):</label>
                 <input type="number" id="budget" min="1" placeholder="e.g., 1000" required>

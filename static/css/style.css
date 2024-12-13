@@ -35,7 +35,7 @@ main {
 .form-section {
     background: #fff;
     border-radius: 8px;
-    padding: 20px;
+    padding: 20px 30px;
     margin: 20px auto;
     max-width: 600px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -54,11 +54,12 @@ label {
 }
 
 input, button {
-    width: 100%;
+    width: calc(100% - 10px);
     padding: 10px;
     margin-bottom: 15px;
     border: 1px solid #ccc;
     border-radius: 4px;
+    box-sizing: border-box;
 }
 
 button {
@@ -71,6 +72,25 @@ button {
 
 button:hover {
     background: #0056b3;
+}
+
+/* Date Container Styles */
+.date-container {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.date-block {
+    width: 48%;
+}
+
+.date-block input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 0.9em;
 }
 
 /* Output Section */
@@ -95,14 +115,35 @@ button:hover {
     word-wrap: break-word;
 }
 
-.output-section ul {
-    margin: 10px 0;
-    padding-left: 20px;
+/* Timeline Container */
+
+/* Download Button Styles */
+.download-link {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 1em;
+    font-weight: bold;
+    color: #fff;
+    background: #007BFF;
+    text-decoration: none;
+    border-radius: 5px;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
-.output-section li {
-    margin-bottom: 8px;
+.download-link:hover {
+    background: #0056b3;
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
 }
+
+.download-link:active {
+    background: #003f7f;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+
 
 /* Footer */
 footer {

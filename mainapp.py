@@ -24,6 +24,9 @@ RDS_DB = os.getenv("RDS_DB")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 sqs = boto3.client('sqs', region_name='us-east-1')
 
+S3_BUCKET_NAME = "trip-planner-responses"  # Ensure this matches your S3 bucket
+s3_client = boto3.client('s3', region_name='us-east-1')
+
 # Function to get database connection
 def get_db_connection():
     return pymysql.connect(
@@ -35,11 +38,13 @@ def get_db_connection():
     )
 
 # Function to send messages to SQS
-def send_to_sqs(location, duration, budget, request_id):
+def send_to_sqs(location, duration, budget, fromDate, toDate, request_id):
     message_body = {
         "location": location,
         "duration": duration,
         "budget": budget,
+        "fromDate": fromDate,
+        "toDate": toDate,
         "request_id": request_id
     }
     try:
@@ -63,7 +68,9 @@ def init_db():
                 id VARCHAR(255) PRIMARY KEY,
                 location TEXT NOT NULL,
                 duration INT NOT NULL,
-                budget FLOAT NOT NULL
+                budget FLOAT NOT NULL,
+                fromDate TEXT NOT NULL,
+                toDate TEXT NOT NULL
             )
         """)
         # Create trip_plans table
@@ -74,6 +81,9 @@ def init_db():
                 itinerary TEXT NOT NULL,
                 best_month_to_visit TEXT NOT NULL,
                 budget_breakdown TEXT NOT NULL,
+                restaurants TEXT NOT NULL,
+                hotels TEXT NOT NULL,
+                weather TEXT NOT NULL,
                 FOREIGN KEY (request_id) REFERENCES input_requests (id)
             )
         """)
@@ -121,9 +131,11 @@ def generate_content():
     location = data.get("location", "").strip()
     duration = data.get("duration", "").strip()
     budget = data.get("budget", "").strip()
+    fromDate = data.get("fromDate", "").strip()
+    toDate = data.get("toDate", "").strip()
 
     if not location or not duration or not budget:
-        return jsonify({"error": "All fields (location, duration, budget) are required!"}), 400
+        return jsonify({"error": "All fields (location, duration, budget, fromDate, toDate) are required!"}), 400
 
     request_id = str(uuid.uuid4())
 
@@ -135,13 +147,13 @@ def generate_content():
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO input_requests (id, location, duration, budget) VALUES (%s, %s, %s, %s)",
-                (request_id, location, duration, budget)
+                "INSERT INTO input_requests (id, location, duration, budget, fromDate, toDate) VALUES (%s, %s, %s, %s, %s, %s)",
+                (request_id, location, duration, budget, fromDate, toDate)
             )
         conn.commit()
 
         # Send request to SQS for asynchronous processing
-        if send_to_sqs(location, duration, budget, request_id):
+        if send_to_sqs(location, duration, budget, fromDate, toDate, request_id):
             return jsonify({"message": "Request submitted", "request_id": request_id}), 200
         else:
             return jsonify({"error": "Failed to send message to SQS."}), 500
@@ -152,6 +164,18 @@ def generate_content():
     finally:
         conn.close()
 
+def generate_presigned_url(s3_key):
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET_NAME, 'Key': s3_key},
+            ExpiresIn=3600  # URL valid for 1 hour
+        )
+        return url
+    except Exception as e:
+        print(f"Failed to generate pre-signed URL: {e}")
+        return None
+
 
 @app.route("/get_result/<request_id>", methods=["GET"])
 def get_result(request_id):
@@ -161,14 +185,19 @@ def get_result(request_id):
             cursor.execute("SELECT * FROM trip_plans WHERE request_id = %s", (request_id,))
             result = cursor.fetchone()
             if result:
-                return jsonify({
-                    "status": "completed",
-                    "data": {
-                        "itinerary": result[2],
-                        "best_month_to_visit": result[3],
-                        "budget_breakdown": result[4]
-                    }
-                }), 200
+                data = {
+                    "itinerary": result[2],
+                    "best_month_to_visit": result[3],
+                    "budget_breakdown": result[4],
+                    "restaurants": result[5],
+                    "hotels": result[6],
+                    "weather": result[7]
+                }
+                s3_key = f"trip_plans/trip_plan_{request_id}.pdf"
+
+                # Generate pre-signed URL for the PDF
+                pdf_url = generate_presigned_url(s3_key)
+                return jsonify({"status": "completed", "data": data, "pdf_url": pdf_url}), 200
             else:
                 return jsonify({"status": "processing"}), 200
     except Exception as e:
