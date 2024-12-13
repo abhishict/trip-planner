@@ -2,17 +2,16 @@ import boto3
 import json
 import pymysql
 import os
-import re
 import google.generativeai as genai
 from dotenv import load_dotenv
+import re
 import uuid
 
 # Load environment variables
 load_dotenv()
-
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# SQS and database details
+# SQS and Database details
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 RDS_HOST = os.getenv("RDS_HOST")
 RDS_PORT = int(os.getenv("RDS_PORT", 3306))
@@ -20,7 +19,7 @@ RDS_USER = os.getenv("RDS_USER")
 RDS_PASSWORD = os.getenv("RDS_PASSWORD")
 RDS_DB = os.getenv("RDS_DB")
 
-sqs = boto3.client('sqs', region_name='us-east-1')  # Adjust region if needed
+sqs = boto3.client('sqs', region_name='us-east-1')
 
 # Function to get database connection
 def get_db_connection():
@@ -32,7 +31,6 @@ def get_db_connection():
         database=RDS_DB
     )
 
-# Function to parse AI response
 def parse_response(response):
     try:
         # Parse Itinerary
@@ -86,8 +84,6 @@ def parse_response(response):
     except Exception as e:
         raise ValueError(f"Failed to parse response: {str(e)}")
 
-
-# Function to process SQS messages
 def process_message(message):
     data = json.loads(message['Body'])
     location = data['location']
@@ -95,7 +91,12 @@ def process_message(message):
     budget = data['budget']
     request_id = data['request_id']
 
-    prompt = f"""
+    print(f"Processing message for request_id: {request_id}, location: {location}, duration: {duration}, budget: {budget}")
+
+    conn = get_db_connection()
+    try:
+        # Generating response
+        prompt = f"""
             You are an expert Tour Planner. Create a detailed travel plan for the following:
             - Location: {location}
             - Duration: {duration} days
@@ -109,26 +110,33 @@ def process_message(message):
             Return the response in markdown format with headings:
             ## Itinerary, ## Best Month to Visit, ## Budget Breakdown, ## Weather Forecast, ## Restaurants, ## Hotels.
             """
-    try:
+        print(f"Generated prompt for request_id {request_id}: {prompt}")
+
+        # Generate AI response
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
-        parsed_data = parse_response(response.text)
+        print(f"AI Response for request_id {request_id}: {response.text.strip()}")
 
-        conn = get_db_connection()
+        # Parse AI response
+        parsed_data = parse_response(response.text.strip())
+        print(f"Parsed data for request_id {request_id}: {parsed_data}")
+
+        # Insert into database
         with conn.cursor() as cursor:
-            # Store the response in the database
             cursor.execute(
                 "INSERT INTO trip_plans (id, request_id, itinerary, best_month_to_visit, budget_breakdown) VALUES (%s, %s, %s, %s, %s)",
                 (str(uuid.uuid4()), request_id, parsed_data['itinerary'], parsed_data['best_month'], parsed_data['budget_breakdown'])
             )
         conn.commit()
-
-        print(f"Processed request {request_id} successfully.")
-
+        print(f"Data successfully inserted for request_id {request_id}")
     except Exception as e:
-        print(f"Failed to process message: {e}")
+        print(f"Failed to process request_id {request_id}: {e}")
+    finally:
+        conn.close()
 
-# Poll SQS for messages
+
+
+# Function to poll SQS for messages
 def poll_sqs():
     while True:
         response = sqs.receive_message(
@@ -136,6 +144,7 @@ def poll_sqs():
             MaxNumberOfMessages=1,
             WaitTimeSeconds=20
         )
+
         messages = response.get('Messages', [])
         for message in messages:
             process_message(message)
