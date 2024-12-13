@@ -1,9 +1,11 @@
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
 import os
-import boto3  # For interacting with AWS SQS
+import boto3
 import pymysql
 import uuid
+import json
+import redis
 from flask_cors import CORS
 
 # Load environment variables
@@ -21,7 +23,16 @@ RDS_DB = os.getenv("RDS_DB")
 
 # SQS details
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
-sqs = boto3.client('sqs', region_name='us-east-1')  # Adjust region if needed
+sqs = boto3.client('sqs', region_name='us-east-1')
+
+# Redis details
+REDIS_HOST = "trip-planner-redis-ohjbrj.serverless.use1.cache.amazonaws.com"
+REDIS_PORT = 6379
+redis_client = redis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    decode_responses=True  # Decode bytes to strings automatically
+)
 
 # Function to get database connection
 def get_db_connection():
@@ -105,8 +116,10 @@ def init_db():
         """)
     conn.commit()
     conn.close()
-    
+
+# Call this function once at the start of your application
 init_db()
+
 
 # Flask routes
 @app.route("/")
@@ -140,17 +153,49 @@ def generate_content():
 
         # Send request to SQS for asynchronous processing
         if send_to_sqs(location, duration, budget, request_id):
-            return jsonify({"message": "Your request has been submitted for processing."}), 200
+            return jsonify({"message": "Request submitted", "request_id": request_id}), 200
         else:
             return jsonify({"error": "Failed to send message to SQS."}), 500
 
     except Exception as e:
         conn.rollback()
-        print(f"Error: {e}")
-        return jsonify({"error": f"Failed to process the request: {str(e)}"}), 500
-
+        return jsonify({"error": f"Failed to process request: {str(e)}"}), 500
     finally:
         conn.close()
+
+
+@app.route("/get_result/<request_id>", methods=["GET"])
+def get_result(request_id):
+    # Check Redis cache first
+    cached_result = redis_client.get(request_id)
+    if cached_result:
+        print(f"Cache hit for request_id: {request_id}")
+        return jsonify({"status": "completed", "data": json.loads(cached_result)}), 200
+
+    # If not in cache, check the database
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM trip_plans WHERE request_id = %s", (request_id,))
+            result = cursor.fetchone()
+            if result:
+                data = {
+                    "itinerary": result[2],
+                    "best_month_to_visit": result[3],
+                    "budget_breakdown": result[4]
+                }
+                # Cache the result in Redis
+                redis_client.set(request_id, json.dumps(data), ex=3600)  # Cache for 1 hour
+                return jsonify({"status": "completed", "data": data}), 200
+            else:
+                print(f"No result found for request_id: {request_id}")
+                return jsonify({"status": "processing"}), 200
+    except Exception as e:
+        print(f"Error fetching result for request_id {request_id}: {e}")
+        return jsonify({"error": f"Failed to fetch result: {str(e)}"}), 500
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)

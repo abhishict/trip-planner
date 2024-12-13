@@ -1,10 +1,12 @@
 import boto3
-import json
 import pymysql
 import os
+import json
 import re
-import google.generativeai as genai
 from dotenv import load_dotenv
+import google.generativeai as genai
+import redis
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -19,9 +21,17 @@ RDS_USER = os.getenv("RDS_USER")
 RDS_PASSWORD = os.getenv("RDS_PASSWORD")
 RDS_DB = os.getenv("RDS_DB")
 
-sqs = boto3.client('sqs', region_name='us-east-1')  # Adjust region if needed
+# Redis details
+REDIS_HOST = "trip-planner-redis-ohjbrj.serverless.use1.cache.amazonaws.com"
+REDIS_PORT = 6379
+redis_client = redis.StrictRedis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    decode_responses=True
+)
 
-# Function to get database connection
+sqs = boto3.client('sqs', region_name='us-east-1')
+
 def get_db_connection():
     return pymysql.connect(
         host=RDS_HOST,
@@ -31,7 +41,6 @@ def get_db_connection():
         database=RDS_DB
     )
 
-# Function to parse AI response
 def parse_response(response):
     try:
         # Parse Itinerary
@@ -85,8 +94,6 @@ def parse_response(response):
     except Exception as e:
         raise ValueError(f"Failed to parse response: {str(e)}")
 
-
-# Function to process SQS messages
 def process_message(message):
     data = json.loads(message['Body'])
     location = data['location']
@@ -94,7 +101,10 @@ def process_message(message):
     budget = data['budget']
     request_id = data['request_id']
 
-    prompt = f"""
+    conn = get_db_connection()
+    try:
+        # Generate AI response
+        prompt = f"""
             You are an expert Tour Planner. Create a detailed travel plan for the following:
             - Location: {location}
             - Duration: {duration} days
@@ -108,32 +118,31 @@ def process_message(message):
             Return the response in markdown format with headings:
             ## Itinerary, ## Best Month to Visit, ## Budget Breakdown, ## Weather Forecast, ## Restaurants, ## Hotels.
             """
-    try:
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
-        parsed_data = parse_response(response.text)
+        parsed_data = parse_response(response.text.strip())
 
-        conn = get_db_connection()
+        # Insert into database
         with conn.cursor() as cursor:
-            # Store the response in the database
             cursor.execute(
                 "INSERT INTO trip_plans (id, request_id, itinerary, best_month_to_visit, budget_breakdown) VALUES (%s, %s, %s, %s, %s)",
                 (str(uuid.uuid4()), request_id, parsed_data['itinerary'], parsed_data['best_month'], parsed_data['budget_breakdown'])
             )
         conn.commit()
 
-        print(f"Processed request {request_id} successfully.")
-
+        # Cache result in Redis
+        redis_client.set(request_id, json.dumps(parsed_data), ex=3600)  # Cache for 1 hour
     except Exception as e:
-        print(f"Failed to process message: {e}")
+        print(f"Failed to process request_id {request_id}: {e}")
+    finally:
+        conn.close()
 
-# Poll SQS for messages
 def poll_sqs():
     while True:
         response = sqs.receive_message(
             QueueUrl=SQS_QUEUE_URL,
             MaxNumberOfMessages=1,
-            WaitTimeSeconds=20
+            WaitTimeSeconds=10
         )
         messages = response.get('Messages', [])
         for message in messages:
