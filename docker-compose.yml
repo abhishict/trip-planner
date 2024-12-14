@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  app:
+    image: 717279696832.dkr.ecr.us-east-1.amazonaws.com/trip-planner-app:latest
+    ports:
+      - "5000:5000"
+    environment:
+      RDS_HOST: database-tp.cn66ioe84692.us-east-1.rds.amazonaws.com
+      RDS_PORT: "3306"
+      RDS_USER: admin
+      RDS_PASSWORD: abhi1710
+      RDS_DB: tpdatabase
+      SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/717279696832/TripPlanQueue"
+      GOOGLE_API_KEY: "AIzaSyAtoBnE4olQlXqejWxnSzSiv4hvQOeHVXs"
+      S3_BUCKET_NAME: trip-planner-responses
+    command: ["python", "mainapp.py"]
+
+  worker:
+    image: 717279696832.dkr.ecr.us-east-1.amazonaws.com/trip-planner-worker:latest
+    environment:
+      RDS_HOST: database-tp.cn66ioe84692.us-east-1.rds.amazonaws.com
+      RDS_PORT: "3306"
+      RDS_USER: admin
+      RDS_PASSWORD: abhi1710
+      RDS_DB: tpdatabase
+      SQS_QUEUE_URL: "https://sqs.us-east-1.amazonaws.com/717279696832/TripPlanQueue"
+      GOOGLE_API_KEY: "AIzaSyAtoBnE4olQlXqejWxnSzSiv4hvQOeHVXs"
+      S3_BUCKET_NAME: trip-planner-responses
+    command: ["python", "sqs_worker.py"]
